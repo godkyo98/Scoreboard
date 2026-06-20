@@ -1,0 +1,38 @@
+{
+	"schemaVersion": 1,
+	"id": "kyoscoreboard",
+	"version": "${version}",
+	"name": "Kyo Scoreboard",
+	"description": "Server-side scoreboard",
+	"authors": [
+		"Kyo"
+	],
+	"contact": {
+		"homepage": "https://fabricmc.net/",
+		"sources": "https://github.com/FabricMC/fabric-example-mod"
+	},
+	"license": "CC0-1.0",
+	"icon": "assets/kyoscoreboard/icon.png",
+	"environment": "server",
+	"entrypoints": {
+		"main": [
+			"vn.kyo.scoreboard.KyoScoreboard"
+		],
+		"client": [
+			"vn.kyo.scoreboard.client.KyoScoreboardClient"
+		]
+	},
+	"mixins": [
+		"kyoscoreboard.mixins.json",
+		{
+			"config": "kyoscoreboard.client.mixins.json",
+			"environment": "client"
+		}
+	],
+	"depends": {
+		"fabricloader": ">=0.19.3",
+		"minecraft": "~26.2",
+		"java": ">=25",
+		"fabric-api": "*"
+	}
+}

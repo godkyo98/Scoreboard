@@ -1,0 +1,39 @@
+{
+  "providers": [
+    {
+      "type": "bitmap",
+      "file": "kyoscoreboard:font/ping.png",
+      "ascent": 6,
+      "height": 9,
+      "chars": ["\uE001"]
+    },
+    {
+      "type": "bitmap",
+      "file": "kyoscoreboard:font/playtime.png",
+      "ascent": 8,
+      "height": 9,
+      "chars": ["\uE002"]
+    },
+    {
+      "type": "bitmap",
+      "file": "kyoscoreboard:font/kills.png",
+      "ascent": 8,
+      "height": 9,
+      "chars": ["\uE003"]
+    },
+    {
+      "type": "bitmap",
+      "file": "kyoscoreboard:font/death.png",
+      "ascent": 8,
+      "height": 9,
+      "chars": ["\uE004"]
+    },
+    {
+      "type": "bitmap",
+      "file": "kyoscoreboard:font/tea.png",
+      "ascent": 8,
+      "height": 9,
+      "chars": ["\uE005"]
+    }
+  ]
+}
