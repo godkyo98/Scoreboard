@@ -10,30 +10,37 @@
     {
       "type": "bitmap",
       "file": "kyoscoreboard:font/playtime.png",
-      "ascent": 8,
+      "ascent": 7,
       "height": 9,
       "chars": ["\uE002"]
     },
     {
       "type": "bitmap",
       "file": "kyoscoreboard:font/kills.png",
-      "ascent": 8,
+      "ascent": 7,
       "height": 9,
       "chars": ["\uE003"]
     },
     {
       "type": "bitmap",
       "file": "kyoscoreboard:font/death.png",
-      "ascent": 8,
+      "ascent": 7,
       "height": 9,
       "chars": ["\uE004"]
     },
     {
       "type": "bitmap",
       "file": "kyoscoreboard:font/tea.png",
-      "ascent": 8,
+      "ascent": 7,
       "height": 9,
       "chars": ["\uE005"]
+    },
+    {
+      "type": "bitmap",
+      "file": "kyoscoreboard:font/coin.png",
+      "ascent": 7,
+      "height": 9,
+      "chars": ["\uE006"]
     }
   ]
 }

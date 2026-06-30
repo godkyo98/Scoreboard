@@ -3,7 +3,8 @@
 	"package": "vn.kyo.scoreboard.mixin",
 	"compatibilityLevel": "JAVA_25",
 	"mixins": [
-		"ExampleMixin"
+		"ExampleMixin",
+		"ServerPlayerMixin"
 	],
 	"injectors": {
 		"defaultRequire": 1
