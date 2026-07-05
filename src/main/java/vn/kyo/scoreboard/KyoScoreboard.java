@@ -1,5 +1,6 @@
 package vn.kyo.scoreboard;
 
+import eu.pb4.placeholders.api.PlaceholderContext;
 import eu.pb4.placeholders.api.PlaceholderResult;
 import eu.pb4.placeholders.api.ServerPlaceholderContext;
 import eu.pb4.placeholders.api.Placeholders;
@@ -12,6 +13,7 @@ import net.fabricmc.fabric.api.networking.v1.ServerPlayConnectionEvents;
 import net.minecraft.ChatFormatting;
 import net.minecraft.commands.Commands;
 import net.minecraft.network.chat.Component;
+import net.minecraft.network.chat.MutableComponent;
 import net.minecraft.network.chat.numbers.BlankFormat;
 import net.minecraft.network.protocol.game.ClientboundSetDisplayObjectivePacket;
 import net.minecraft.network.protocol.game.ClientboundSetObjectivePacket;
@@ -39,14 +41,36 @@ public class KyoScoreboard implements ModInitializer {
     // Kích hoạt việc đăng ký Placeholder tự tạo!
     registerCustomPlaceholders();
 
+    // ==========================================
+    // ĐĂNG KÝ LỆNH /kyoscoreboard reload
+    // ==========================================
     CommandRegistrationCallback.EVENT.register((dispatcher, registryAccess, environment) -> {
       dispatcher.register(Commands.literal("kyoscoreboard")
-          .requires(source -> source.getPlayer() == null || source.getServer().getPlayerList().isOp(source.getPlayer().nameAndId()))
-          .then(Commands.literal("reload").executes(context -> {
-            KyoConfig.loadConfig();
-            context.getSource().sendSystemMessage(Component.literal("§a[KyoScoreboard] Đã tải lại Config thành công!"));
-            return 1;
-          })));
+          // 1. Kiểm tra quyền OP (Áp dụng chuẩn 26.2 của sếp)
+          .requires(source -> {
+            if (source.getEntity() instanceof ServerPlayer player) {
+              return source.getServer().getPlayerList().isOp(player.nameAndId());
+            }
+            return true; // Cho phép chạy từ Console
+          })
+          // 2. Nhánh lệnh con "reload"
+          .then(Commands.literal("reload")
+              .executes(context -> {
+                // Tải lại file JSON
+                KyoConfig.loadConfig();
+
+                // Lặp qua toàn bộ người chơi đang online để Xóa và Tạo lại bảng điểm
+                for (ServerPlayer p : context.getSource().getServer().getPlayerList().getPlayers()) {
+                  removeSidebar(p);
+                  initSidebar(p);
+                }
+
+                // Gửi thông báo thành công (Áp dụng chuẩn 26.2)
+                context.getSource().sendSystemMessage(Component.literal("§a[Kyo Scoreboard] Đã tải lại cấu hình thành công!"));
+                return 1;
+              })
+          )
+      );
     });
 
     ServerPlayConnectionEvents.JOIN.register((handler, sender, server) -> {
@@ -55,116 +79,173 @@ public class KyoScoreboard implements ModInitializer {
     });
 
     ServerTickEvents.END_SERVER_TICK.register(server -> {
-      if (server.getTickCount() % 20 == 0) {
+      if (server.getTickCount() % 20 == 0) { // Cập nhật 1 giây/lần
         for (ServerPlayer player : server.getPlayerList().getPlayers()) {
-          updateSidebar(player);
+          updateSidebar(player); // Chỉ cần gọi hàm gốc này của sếp là đủ combo Tiêu đề + Dòng dữ liệu
         }
       }
     });
+
+    // 2. Khi người chơi THOÁT server -> Xóa bảng điểm cho sạch bộ nhớ Client
+    ServerPlayConnectionEvents.DISCONNECT.register((handler, server) -> {
+      ServerPlayer player = handler.player;
+      removeSidebar(player);
+    });
   }
 
-  // Bộ lọc mốc màu PvP thô cho Scoreboard (Dạng chuỗi mã màu Legacy)
-  public static String getKillsColorCode(int kills) {
-    if (kills >= 10000) return "§4§l"; // Đỏ sậm + In đậm (Quỷ vương PvP)
-    if (kills >= 5000)  return "§c";   // Đỏ sáng (Huyền thoại)
-    if (kills >= 1000)  return "§6";   // Cam (Chiến thần)
-    if (kills >= 500)  return "§e";   // Vàng (Sát thủ)
-    if (kills >= 150)   return "§b";   // Xanh lơ (Thợ săn)
-    if (kills >= 50)   return "§a";   // Xanh lá (Tập sự)
-    return "§f";                      // Trắng (Tân binh)
-  }
-
-  // Bộ lọc mốc màu cho mã nguồn Mixin TabList (Dạng ChatFormatting)
+  // Hàm của sếp được giữ lại để dùng (Bỏ đoạn String cũ đi cũng được)
   public static ChatFormatting getKillsChatFormatting(int kills) {
     if (kills >= 10000) return ChatFormatting.DARK_RED;
     if (kills >= 5000)  return ChatFormatting.RED;
     if (kills >= 1000)  return ChatFormatting.GOLD;
-    if (kills >= 500)  return ChatFormatting.YELLOW;
+    if (kills >= 500)   return ChatFormatting.YELLOW;
     if (kills >= 150)   return ChatFormatting.AQUA;
-    if (kills >= 50)   return ChatFormatting.GREEN;
+    if (kills >= 50)    return ChatFormatting.GREEN;
     return ChatFormatting.WHITE;
   }
 
-  // Bộ lọc mốc màu cho Thời gian chơi (Tính theo Tổng NGÀY)
+  // ==========================================
+  // BỘ LỌC MỐC THỜI GIAN CHƠI (HỆ THỐNG TIER RPG) - ĐÃ ĐỒNG BỘ THẺ V3
+  // ==========================================
   public static String getPlaytimeColorCode(int totalDays) {
-    if (totalDays >= 365) return "§d§l"; // Tím hồng in đậm (Huyền thoại 1 Năm)
-    if (totalDays >= 100) return "§4§l"; // Đỏ sậm in đậm (Bậc thầy)
-    if (totalDays >= 50)  return "§c";   // Đỏ (Chuyên gia)
-    if (totalDays >= 30)  return "§6";   // Cam (Gắn bó 1 tháng)
-    if (totalDays >= 10)  return "§e";   // Vàng (Thân thiết)
-    if (totalDays >= 5)   return "§b";   // Xanh lơ (Quen thuộc)
-    if (totalDays >= 1)   return "§a";   // Xanh lá (Công dân chính thức)
-    return "§f";                         // Trắng (Tân binh chưa đủ 1 ngày)
+    // --- MỐC THẦN THOẠI ---
+    if (totalDays >= 730) return "<bold><#FF3300>"; // 2 Năm+: Màu Đỏ Cam rực lửa
+    if (totalDays >= 365) return "<bold><#00FFFF>"; // 1 Năm: Xanh Lục Bảo Diamond chói sáng
+    if (totalDays >= 180) return "<bold><#FF55FF>"; // Nửa năm: Tím Neon chói lóa
+
+    // --- MỐC CAO THỦ (Đã chuyển § sang thẻ STF chuẩn) ---
+    if (totalDays >= 90)  return "<bold><dark_red>"; // 3 Tháng: Đỏ sậm in đậm
+    if (totalDays >= 60)  return "<red>";           // 2 Tháng: Đỏ tươi
+    if (totalDays >= 30)  return "<gold>";          // 1 Tháng: Cam Vàng
+
+    // --- MỐC TÂN BINH & GẮN BÓ ---
+    if (totalDays >= 14)  return "<dark_purple>";   // 2 Tuần: Tím
+    if (totalDays >= 7)   return "<blue>";          // 1 Tuần: Xanh lam đậm
+    if (totalDays >= 3)   return "<aqua>";          // 3 Ngày: Xanh lơ
+    if (totalDays >= 1)   return "<green>";         // 1 Ngày: Xanh lá
+
+    return "<white>";                               // Mặc định dưới 1 ngày: Trắng
   }
 
-  // Bộ lọc mốc màu cho Ping (Độ trễ mạng)
-  public static String getPingColorCode(int ping) {
-    if (ping < 0) return "§8";      // Xám tối (Đang tải/Lỗi)
-    if (ping <= 50) return "§a";    // Xanh lá (Kết nối tuyệt vời)
-    if (ping <= 100) return "§e";   // Vàng (Kết nối ổn định)
-    if (ping <= 200) return "§6";   // Cam (Kết nối trung bình, hơi giật)
-    return "§c";                    // Đỏ (Đường truyền kém, rất lag)
+  // Hàm lấy Icon/Huy hiệu tương ứng với số ngày (Đã đồng bộ thẻ màu)
+  public static String getPlaytimeBadge(int totalDays) {
+    if (totalDays >= 730) return "<gold>👑</gold> ";
+    if (totalDays >= 365) return "<yellow>★</yellow> ";
+    if (totalDays >= 180) return "<light_purple>✦</light_purple> ";
+    if (totalDays >= 90)  return "<dark_red>⚔</dark_red> "; // Chuyển từ §4
+    if (totalDays >= 30)  return "<gold>♦</gold> ";         // Chuyển từ §6
+    return "";
   }
 
-  public static String getDeathsColorCode(int deaths) {
-    if (deaths >= 300) return "§7";   // >100 mạng: Xám xịt (Chán chả buồn nói)
-    if (deaths >= 150)  return "§c";   // >150 mạng: Đỏ (Chê mạnh / Quá tạ)
-    if (deaths >= 50)  return "§6";   // >50 mạng: Cam (Chê nhẹ)
-    if (deaths >= 25)   return "§e";   // >25 mạng: Vàng (Bình thường)
-    if (deaths >= 10)   return "§a";   // 10 mạng: Xanh lá (Sống dai)
-    return "§b§l";                    // 0 mạng: Aqua Đậm (Bất tử - Vinh danh tối cao)
-  }
-
-  // Nơi khai sinh ra các biến Placeholder Custom của bạn
+  // Nơi khai sinh ra các biến Placeholder Custom
   private void registerCustomPlaceholders() {
-    // 1. Đăng ký Playtime (Ngày:Giờ:Phút) với Màu Động & Thành Tựu
-    Placeholders.registerServer(Identifier.tryParse("kyoscoreboard:playtime"), (context, arg) -> {
-      ServerPlayer player = (ServerPlayer) context.player();
-      if (player == null) return PlaceholderResult.value("§f0h 0m");
-
-      // Lấy thời gian từ thống kê của game
-      int ticks = player.getStats().getValue(Stats.CUSTOM.get(Stats.PLAY_TIME));
-      int totalMinutes = (ticks / 20) / 60;
-      int totalHours = totalMinutes / 60;
-
-      // Bóc tách số Ngày, Giờ lẻ, Phút lẻ
-      int totalDays = totalHours / 24;
-      int hours = totalHours % 24;
-      int minutes = totalMinutes % 60;
-
-      // Lấy màu tự động dựa trên tổng số NGÀY
-      String color = getPlaytimeColorCode(totalDays);
-
-      // THÀNH TỰU 1 NĂM: Thêm ngôi sao vàng cực ngầu nếu chơi đủ 365 ngày
-      String badge = (totalDays >= 365) ? "§e★ " : "";
-
-      // Định dạng chuỗi hiển thị cực kỳ thông minh
-      String timeString;
-      if (totalDays > 0) {
-        // Nếu đã chơi qua 1 ngày: Hiển thị (Ngày d - Giờ h - Phút m)
-        timeString = totalDays + "d " + hours + "h " + minutes + "m";
-      } else {
-        // Nếu chưa đủ 1 ngày: Chỉ hiện (Giờ h - Phút m) cho gọn gàng
-        timeString = hours + "h " + minutes + "m";
+    Placeholders.registerServer(Identifier.fromNamespaceAndPath("kyoscoreboard", "playtime"), (context, arg) -> {
+      if (!context.hasPlayer() || context.player() == null) {
+        return PlaceholderResult.value(Component.literal("0h 1m"));
       }
 
-      // Nối tất cả lại: [Màu sắc] + [Huy Hiệu] + [Thời gian]
-      return PlaceholderResult.value(color + badge + timeString);
+      ServerPlayer player = (ServerPlayer) context.player();
+      int playTimeTicks = player.getStats().getValue(Stats.CUSTOM.get(Stats.PLAY_TIME));
+
+      int totalSeconds = playTimeTicks / 20;
+      int totalDays = totalSeconds / 86400;
+      int hours = (totalSeconds % 86400) / 3600;
+      int minutes = ((totalSeconds % 86400) % 3600) / 60;
+
+      int years = totalDays / 365;
+      int remDays = totalDays % 365;
+
+      int months = remDays / 30;
+      remDays = remDays % 30;
+
+      int weeks = remDays / 7;
+      int days = remDays % 7;
+
+      // Lấy chuỗi cấu trúc thẻ màu và huy hiệu
+      String color = getPlaytimeColorCode(totalDays);
+      String badge = getPlaytimeBadge(totalDays);
+
+      // Cấu trúc chuỗi thời gian thông minh của sếp (Giữ nguyên 100%)
+      String timeString;
+      if (years > 0) {
+        timeString = years + "y " + (months > 0 ? months + "mo" : "");
+      } else if (months > 0) {
+        timeString = months + "mo " + (weeks > 0 ? weeks + "w " : "") + (days > 0 ? days + "d" : "");
+      } else if (weeks > 0) {
+        timeString = weeks + "w " + (days > 0 ? days + "d " : "") + (hours > 0 ? hours + "h" : "");
+      } else if (days > 0) {
+        timeString = days + "d " + (hours > 0 ? hours + "h " : "") + (minutes > 0 ? minutes + "m" : "");
+      } else if (hours > 0) {
+        timeString = hours + "h " + minutes + "m";
+      } else {
+        timeString = (minutes == 0 ? 1 : minutes) + "m";
+      }
+
+      // Gộp tất cả thành 1 chuỗi thô chứa tag hoàn chỉnh: "<bold><#FF3300>👑 1y 2mo"
+      String rawCombined = color + badge + timeString.trim();
+
+      // KHẮC PHỤC LỖI CHÍ MẠNG:
+      // Dùng TagParser quét chuỗi thô này để dịch toàn bộ thẻ màu và ép thẳng ra Component xịn của bản V3
+      Component parsedComponent = TagParser.DEFAULT.parseNode(rawCombined).toComponent(context.asParserContext());
+
+      return PlaceholderResult.value(parsedComponent);
     });
 
-    // FIX: Tự động bơm mã màu động của Rank PvP vào trước con số
+    // 1. KILLS: NHUỘM MÀU ĐỘNG BẰNG CHAT FORMATTING TỪ LÕI
     Placeholders.registerServer(Identifier.tryParse("kyoscoreboard:kills"), (context, arg) -> {
       ServerPlayer player = (ServerPlayer) context.player();
-      if (player == null) return PlaceholderResult.value("§f0");
+      if (player == null) return PlaceholderResult.value(Component.literal("0").withStyle(ChatFormatting.WHITE));
+
       int kills = player.getStats().getValue(Stats.CUSTOM.get(Stats.PLAYER_KILLS));
-      return PlaceholderResult.value(getKillsColorCode(kills) + kills);
+
+      // Khôi phục quyền lực cho hàm ChatFormatting của sếp!
+      ChatFormatting color = getKillsChatFormatting(kills);
+      MutableComponent killComp = Component.literal(String.valueOf(kills)).withStyle(color);
+
+      // Nếu là Quỷ Vương (>= 10000 mạng), buff thêm hiệu ứng IN ĐẬM
+      if (kills >= 10000) killComp.withStyle(ChatFormatting.BOLD);
+
+      // Trả về Component có màu -> PlaceholderAPI tự động lắp vào mọi chỗ (Tab/Scoreboard)
+      return PlaceholderResult.value(killComp);
     });
 
+    // 4. DANH HIỆU PVP (KILL_TITLE) SẾP VỪA DUYỆT BÊN TRÊN
+    Placeholders.registerServer(Identifier.tryParse("kyoscoreboard:kill_title"), (context, arg) -> {
+      ServerPlayer player = (ServerPlayer) context.player();
+      if (player == null) return PlaceholderResult.value(Component.literal("[Tân Binh]").withStyle(ChatFormatting.WHITE));
+      int kills = player.getStats().getValue(Stats.CUSTOM.get(Stats.PLAYER_KILLS));
+
+      Component titleComp;
+      if (kills >= 10000) titleComp = Component.literal("[Quỷ Vương]").withStyle(ChatFormatting.DARK_RED, ChatFormatting.BOLD);
+      else if (kills >= 5000)  titleComp = Component.literal("[Huyền Thoại]").withStyle(ChatFormatting.RED);
+      else if (kills >= 1000)  titleComp = Component.literal("[Chiến Thần]").withStyle(ChatFormatting.GOLD);
+      else if (kills >= 500)  titleComp = Component.literal("[Sát Thủ]").withStyle(ChatFormatting.YELLOW);
+      else if (kills >= 150)   titleComp = Component.literal("[Thợ Săn]").withStyle(ChatFormatting.AQUA);
+      else if (kills >= 50)   titleComp = Component.literal("[Tập Sự]").withStyle(ChatFormatting.GREEN);
+      else titleComp = Component.literal("[Tân Binh]").withStyle(ChatFormatting.WHITE);
+      return PlaceholderResult.value(titleComp);
+    });
+
+    // 2. DEATHS: NHUỘM MÀU TẤU TẠ CŨNG BẰNG COMPONENT
     Placeholders.registerServer(Identifier.tryParse("kyoscoreboard:deaths"), (context, arg) -> {
       ServerPlayer player = (ServerPlayer) context.player();
-      if (player == null) return PlaceholderResult.value("§b§l0");
+      if (player == null) return PlaceholderResult.value(Component.literal("0").withStyle(ChatFormatting.AQUA, ChatFormatting.BOLD));
+
       int deaths = player.getStats().getValue(Stats.CUSTOM.get(Stats.DEATHS));
-      return PlaceholderResult.value(getDeathsColorCode(deaths) + deaths);
+
+      // Sếp có thể tự tạo getDeathsChatFormatting tương tự Kills
+      ChatFormatting color;
+      if (deaths >= 300) color = ChatFormatting.GRAY;
+      else if (deaths >= 150) color = ChatFormatting.RED;
+      else if (deaths >= 50) color = ChatFormatting.GOLD;
+      else if (deaths >= 25) color = ChatFormatting.YELLOW;
+      else if (deaths >= 10) color = ChatFormatting.GREEN;
+      else color = ChatFormatting.AQUA;
+
+      MutableComponent deathComp = Component.literal(String.valueOf(deaths)).withStyle(color);
+      if (deaths == 0) deathComp.withStyle(ChatFormatting.BOLD); // Vinh danh 0 mạng
+
+      return PlaceholderResult.value(deathComp);
     });
 
     // 4. Hồi sinh hệ thống Đa ngôn ngữ (kyo:lang)
@@ -174,36 +255,49 @@ public class KyoScoreboard implements ModInitializer {
       return PlaceholderResult.value(Component.translatable(arg));
     });
 
-    // Đăng ký Ping với Màu Động tự động
+    // 3. PING: NHUỘM MÀU MƯỢT MÀ
     Placeholders.registerServer(Identifier.tryParse("kyoscoreboard:ping"), (context, arg) -> {
       ServerPlayer player = (ServerPlayer) context.player();
-      if (player == null) return PlaceholderResult.value("§80ms");
+      if (player == null) return PlaceholderResult.value(Component.literal("0ms").withStyle(ChatFormatting.DARK_GRAY));
 
-      // Lấy chỉ số Ping thực tế từ kết nối của người chơi
       int ping = player.connection.latency();
+      ChatFormatting color = ping < 50 ? ChatFormatting.GREEN : (ping < 150 ? ChatFormatting.YELLOW : ChatFormatting.RED);
 
-      // Lấy màu tự động dựa trên số Ping
-      String color = getPingColorCode(ping);
-
-      return PlaceholderResult.value(color + ping + " ms");
+      return PlaceholderResult.value(Component.literal(ping + "ms").withStyle(color));
     });
   }
 
+  // Hàm ép Client tạo bảng điểm lần đầu
   private void initSidebar(ServerPlayer player) {
-    player.connection.send(new ClientboundSetObjectivePacket(getSidebarObjective(player), 0));
-    player.connection.send(new ClientboundSetDisplayObjectivePacket(DisplaySlot.SIDEBAR, getSidebarObjective(player)));
+    Objective objective = getSidebarObjective(player);
+    // Action 0: Khởi tạo bảng (Create)
+    player.connection.send(new ClientboundSetObjectivePacket(objective, 0));
+    // Đặt bảng điểm vào đúng slot góc phải màn hình
+    player.connection.send(new ClientboundSetDisplayObjectivePacket(DisplaySlot.SIDEBAR, objective));
   }
 
   private Objective getSidebarObjective(ServerPlayer player) {
     ServerPlaceholderContext context = ServerPlaceholderContext.of(player);
-    TextNode colorNode = TagParser.DEFAULT.parseNode(KyoConfig.SERVER_NAME);
+
+    // 1. Tự động tính toán số khung hình (Frame Index) dựa trên Tick thực tế của Server
+    int tickCount = player.level().getServer().getTickCount();
+    int frameIndex = (tickCount / 20) % KyoConfig.ANIMATED_TITLE.size();
+    String rawTitle = KyoConfig.ANIMATED_TITLE.get(frameIndex);
+
+    // 2. Ép qua bộ lọc màu STF và dịch Placeholder chuẩn API V3 giống hệt cách sếp làm với boardLines
+    TextNode colorNode = TagParser.DEFAULT.parseNode(rawTitle);
     TextNode finalNode = Placeholders.SERVER_PLACEHOLDER_PARSER.parseNode(colorNode);
     Component title = finalNode.toComponent(context.asParserContext());
-    return new Objective(DUMMY_SCOREBOARD, SIDEBAR_OBJECTIVE_NAME, ObjectiveCriteria.DUMMY, title, ObjectiveCriteria.RenderType.INTEGER, false, null);
+
+    // 3. Trả về đúng Objective gốc với BlankFormat để giấu số đỏ Vanilla
+    return new Objective(DUMMY_SCOREBOARD, SIDEBAR_OBJECTIVE_NAME, ObjectiveCriteria.DUMMY, title, ObjectiveCriteria.RenderType.INTEGER, false, BlankFormat.INSTANCE);
   }
 
   private void updateSidebar(ServerPlayer player) {
+    // Gửi packet cập nhật tiêu đề (Action số 2)
     player.connection.send(new ClientboundSetObjectivePacket(getSidebarObjective(player), 2));
+
+    // Vẽ lại toàn bộ các dòng (Kinh tế, Ping, Kills...) vào đúng Objective gốc
     ServerPlaceholderContext context = ServerPlaceholderContext.of(player);
     List<String> lines = KyoConfig.BOARD_LINES;
     for (int i = 0; i < lines.size(); i++) {
@@ -213,6 +307,13 @@ public class KyoScoreboard implements ModInitializer {
       Component finalComponent = finalNode.toComponent(context.asParserContext());
       sendLine(player, "tea_line_" + i, lines.size() - i, finalComponent);
     }
+  }
+
+  // Hàm dọn rác Client khi người chơi thoát
+  private void removeSidebar(ServerPlayer player) {
+    Objective objective = getSidebarObjective(player);
+    // Action 1: Xóa bảng (Remove)
+    player.connection.send(new ClientboundSetObjectivePacket(objective, 1));
   }
 
   private void sendLine(ServerPlayer player, String holderName, int score, Component text) {
